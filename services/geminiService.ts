@@ -6,11 +6,10 @@ export class GeminiService {
   private ai: GoogleGenAI | null = null;
 
   private getClient() {
-    // This value is injected by Vite during the 'build' process on Vercel.
+    // This value is replaced by Vite during build time.
     const apiKey = process.env.API_KEY;
     
-    if (!apiKey || apiKey.trim() === "") {
-      console.error("Luminol Error: API_KEY is missing from build environment.");
+    if (!apiKey || apiKey === "" || apiKey === "''") {
       return null;
     }
     
@@ -23,7 +22,7 @@ export class GeminiService {
   async *streamChat(history: Message[], latestMessage: Message) {
     const ai = this.getClient();
     if (!ai) {
-      yield "⚠️ **Configuration Error:** The AI key is missing from the build. \n\n**To fix this:**\n1. Add `API_KEY` to **Environment Variables** in your Vercel Project Settings.\n2. Go to the **Deployments** tab and click **Redeploy** (this is required to 'bake' the key into the app).";
+      yield "⚠️ **System Configuration Error:** The Gemini API Key is missing. \n\n**Keneilwe**, please ensure your developer has added the `API_KEY` to the Vercel Environment Variables and **Redeployed** the project in the Vercel dashboard.";
       return;
     }
 
@@ -56,17 +55,16 @@ export class GeminiService {
       });
 
       for await (const chunk of responseStream) {
-        const text = chunk.text;
-        if (text) {
-          yield text;
+        if (chunk.text) {
+          yield chunk.text;
         }
       }
     } catch (error: any) {
       console.error("Gemini API Error:", error);
       if (error?.message?.includes('API_KEY_INVALID')) {
-        yield "❌ **Invalid Key:** The API key in Vercel is incorrect. Please double-check it and redeploy.";
+        yield "❌ **Invalid Key:** The provided API key is incorrect. Please check it on ai.google.dev and update Vercel.";
       } else {
-        yield "❌ **Connection Error:** I couldn't reach my brain. Please check your connection or redeploy the app on Vercel.";
+        yield "❌ **Error:** I encountered an issue connecting to my brain. Please try again or check the console.";
       }
     }
   }

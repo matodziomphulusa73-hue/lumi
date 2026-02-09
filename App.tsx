@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, Type, LiveServerMessage } from '@google/genai';
 import { Role, Message, ChatSession } from './types';
@@ -131,8 +130,7 @@ const App: React.FC = () => {
       let streamContent = '';
       setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: [...s.messages, { id: modelMsgId, role: Role.MODEL, parts: [{ text: '' }], timestamp: Date.now() }] } : s));
 
-      const currentSess = sessions.find(s => s.id === activeSessionId);
-      const history = currentSess ? currentSess.messages : [];
+      const history = sessions.find(s => s.id === activeSessionId)?.messages || [];
       const stream = geminiService.streamChat(history, userMsg);
       
       for await (const chunk of stream) {
@@ -140,13 +138,12 @@ const App: React.FC = () => {
         setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: s.messages.map(m => m.id === modelMsgId ? { ...m, parts: [{ text: streamContent }] } : m) } : s));
       }
 
-      const currentSessAfter = sessions.find(s => s.id === activeSessionId);
-      if (currentSessAfter && currentSessAfter.messages.length <= 2) {
+      if (history.length <= 1) {
         const title = await geminiService.generateTitle(text);
         setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, title } : s));
       }
     } catch (err) {
-      setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: [...s.messages, { id: crypto.randomUUID(), role: Role.MODEL, parts: [{ text: "There was an unexpected error. Finish what you were doing." }], timestamp: Date.now() }] } : s));
+      console.error(err);
     } finally { setIsLoading(false); }
   };
 
@@ -163,76 +160,88 @@ const App: React.FC = () => {
       return;
     }
 
+    const apiKey = process.env.API_KEY;
+    if (!apiKey || apiKey === "" || apiKey === "''") {
+      alert("⚠️ Configuration Error: API_KEY is missing. Please add it to Vercel and redeploy.");
+      return;
+    }
+
     setIsVoiceMode(true);
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+    const ai = new GoogleGenAI({ apiKey });
     
-    outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-    
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    
-    const sessionPromise = ai.live.connect({
-      model: LIVE_MODEL,
-      callbacks: {
-        onopen: () => {
-          setIsLiveConnected(true);
-          const source = audioContextRef.current!.createMediaStreamSource(stream);
-          const scriptProcessor = audioContextRef.current!.createScriptProcessor(4096, 1, 1);
-          scriptProcessor.onaudioprocess = (e) => {
-            const inputData = e.inputBuffer.getChannelData(0);
-            const l = inputData.length;
-            const int16 = new Int16Array(l);
-            for (let i = 0; i < l; i++) int16[i] = inputData[i] * 32768;
-            const pcmBlob = { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
-            sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
-          };
-          source.connect(scriptProcessor);
-          scriptProcessor.connect(audioContextRef.current!.destination);
-        },
-        onmessage: async (message: LiveServerMessage) => {
-          if (message.toolCall) {
-            for (const fc of message.toolCall.functionCalls) {
-              if (fc.name === 'openTradingView') {
-                const result = openTradingView();
-                sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result } } }));
+    try {
+      outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      const sessionPromise = ai.live.connect({
+        model: LIVE_MODEL,
+        callbacks: {
+          onopen: () => {
+            setIsLiveConnected(true);
+            const source = audioContextRef.current!.createMediaStreamSource(stream);
+            const scriptProcessor = audioContextRef.current!.createScriptProcessor(4096, 1, 1);
+            scriptProcessor.onaudioprocess = (e) => {
+              const inputData = e.inputBuffer.getChannelData(0);
+              const l = inputData.length;
+              const int16 = new Int16Array(l);
+              for (let i = 0; i < l; i++) int16[i] = inputData[i] * 32768;
+              const pcmBlob = { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
+              sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
+            };
+            source.connect(scriptProcessor);
+            scriptProcessor.connect(audioContextRef.current!.destination);
+          },
+          onmessage: async (message: LiveServerMessage) => {
+            if (message.toolCall) {
+              for (const fc of message.toolCall.functionCalls) {
+                if (fc.name === 'openTradingView') {
+                  const result = openTradingView();
+                  sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result } } }));
+                }
               }
             }
-          }
 
-          const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-          if (audioData) {
-            const ctx = outputAudioContextRef.current!;
-            nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
-            const buffer = await decodeAudioData(decode(audioData), ctx, 24000, 1);
-            const source = ctx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(ctx.destination);
-            source.addEventListener('ended', () => sourcesRef.current.delete(source));
-            source.start(nextStartTimeRef.current);
-            nextStartTimeRef.current += buffer.duration;
-            sourcesRef.current.add(source);
-          }
+            const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+            if (audioData) {
+              const ctx = outputAudioContextRef.current!;
+              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
+              const buffer = await decodeAudioData(decode(audioData), ctx, 24000, 1);
+              const source = ctx.createBufferSource();
+              source.buffer = buffer;
+              source.connect(ctx.destination);
+              source.addEventListener('ended', () => sourcesRef.current.delete(source));
+              source.start(nextStartTimeRef.current);
+              nextStartTimeRef.current += buffer.duration;
+              sourcesRef.current.add(source);
+            }
 
-          if (message.serverContent?.interrupted) {
-            sourcesRef.current.forEach(s => { try { s.stop(); } catch(e){} });
-            sourcesRef.current.clear();
-            nextStartTimeRef.current = 0;
-          }
+            if (message.serverContent?.interrupted) {
+              sourcesRef.current.forEach(s => { try { s.stop(); } catch(e){} });
+              sourcesRef.current.clear();
+              nextStartTimeRef.current = 0;
+            }
+          },
+          onclose: () => { setIsVoiceMode(false); setIsLiveConnected(false); },
+          onerror: () => { setIsVoiceMode(false); setIsLiveConnected(false); }
         },
-        onclose: () => { setIsVoiceMode(false); setIsLiveConnected(false); },
-        onerror: () => { setIsVoiceMode(false); setIsLiveConnected(false); }
-      },
-      config: {
-        responseModalities: [Modality.AUDIO],
-        systemInstruction: SYSTEM_INSTRUCTION,
-        tools: [{ functionDeclarations: [{
-          name: 'openTradingView',
-          parameters: { type: Type.OBJECT, properties: {} }
-        }]}]
-      }
-    });
+        config: {
+          responseModalities: [Modality.AUDIO],
+          systemInstruction: SYSTEM_INSTRUCTION,
+          tools: [{ functionDeclarations: [{
+            name: 'openTradingView',
+            parameters: { type: Type.OBJECT, properties: {} }
+          }]}]
+        }
+      });
 
-    sessionRef.current = await sessionPromise;
+      sessionRef.current = await sessionPromise;
+    } catch (err) {
+      console.error(err);
+      setIsVoiceMode(false);
+      alert("Microphone access is required for Voice Tutor.");
+    }
   };
 
   return (
@@ -258,7 +267,7 @@ const App: React.FC = () => {
               <button key={session.id} onClick={() => setCurrentSessionId(session.id)} className={`group flex items-center gap-3 w-full p-3 rounded-xl transition-all text-left relative ${currentSessionId === session.id ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/20' : 'hover:bg-slate-800/40 text-slate-400 border border-transparent'}`}>
                 <MessageSquare size={16} className="flex-shrink-0" />
                 <span className="flex-1 truncate text-sm font-medium">{session.title}</span>
-                <div onClick={(e) => deleteSession(e, session.id)} className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400"><Trash2 size={14} /></div>
+                <div onClick={(e) => deleteSession(e, session.id)} className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-opacity"><Trash2 size={14} /></div>
               </button>
             ))}
           </div>
@@ -314,7 +323,7 @@ const App: React.FC = () => {
                   <Brain size={40} fill="white" className="drop-shadow-[0_0_12px_rgba(255,255,255,1)]" />
                 </div>
                 <h3 className="text-4xl font-black mb-4 text-white">Hi Keneilwe, I'm Lumi</h3>
-                <p className="text-slate-400 max-w-lg mb-12 text-lg">Hi Keneilwe, I'm Lumi your Personal AI assistant built for you by your Girlfriend, How can i help you today?</p>
+                <p className="text-slate-400 max-w-lg mb-12 text-lg">Your Personal AI assistant, built just for you. How can I support your studies or analysis today?</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-2xl px-4">
                   {[
                     "I need to vent about my day",
