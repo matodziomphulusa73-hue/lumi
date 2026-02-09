@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: './',
   define: {
-    // Vercel provides process.env during build, which Vite injects here
+    // Vite will replace this string during the build on Vercel
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || '')
   },
   build: {

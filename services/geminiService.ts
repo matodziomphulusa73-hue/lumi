@@ -6,11 +6,11 @@ export class GeminiService {
   private ai: GoogleGenAI | null = null;
 
   private getClient() {
-    // Vite replaces process.env.API_KEY at build time from the Vercel environment
+    // This value is injected by Vite during the 'build' process on Vercel.
     const apiKey = process.env.API_KEY;
     
-    if (!apiKey || apiKey === "") {
-      console.error("Luminol Error: API_KEY is missing. Check Vercel Project Settings.");
+    if (!apiKey || apiKey.trim() === "") {
+      console.error("Luminol Error: API_KEY is missing from build environment.");
       return null;
     }
     
@@ -23,7 +23,7 @@ export class GeminiService {
   async *streamChat(history: Message[], latestMessage: Message) {
     const ai = this.getClient();
     if (!ai) {
-      yield "⚠️ **System Configuration Error:** The Gemini API Key is missing. Keneilwe, please ensure your developer has added the `API_KEY` to the **Vercel Environment Variables** and redeployed the project.";
+      yield "⚠️ **Configuration Error:** The AI key is missing from the build. \n\n**To fix this:**\n1. Add `API_KEY` to **Environment Variables** in your Vercel Project Settings.\n2. Go to the **Deployments** tab and click **Redeploy** (this is required to 'bake' the key into the app).";
       return;
     }
 
@@ -52,8 +52,6 @@ export class GeminiService {
         config: {
           systemInstruction: SYSTEM_INSTRUCTION,
           temperature: 0.7,
-          topP: 0.95,
-          topK: 40,
         },
       });
 
@@ -66,28 +64,28 @@ export class GeminiService {
     } catch (error: any) {
       console.error("Gemini API Error:", error);
       if (error?.message?.includes('API_KEY_INVALID')) {
-        yield "❌ **Error:** The API Key provided is invalid. Please update it in Vercel.";
+        yield "❌ **Invalid Key:** The API key in Vercel is incorrect. Please double-check it and redeploy.";
       } else {
-        yield "❌ **Error:** Failed to connect to the AI brain. Please check your internet or try again later.";
+        yield "❌ **Connection Error:** I couldn't reach my brain. Please check your connection or redeploy the app on Vercel.";
       }
     }
   }
 
   async generateTitle(firstMessage: string): Promise<string> {
     const ai = this.getClient();
-    if (!ai) return "New Chat";
+    if (!ai) return "New Discussion";
 
     try {
       const response = await ai.models.generateContent({
         model: DEFAULT_MODEL,
-        contents: `Summarize this message into a short 3-5 word title for a chat thread: "${firstMessage}"`,
+        contents: `Create a very short (2-3 word) title for a chat starting with: "${firstMessage}"`,
         config: {
           maxOutputTokens: 20
         }
       });
-      return response.text?.replace(/"/g, '').trim() || "New Chat";
+      return response.text?.replace(/[#*"]/g, '').trim() || "New Discussion";
     } catch {
-      return "New Chat";
+      return "New Discussion";
     }
   }
 }
