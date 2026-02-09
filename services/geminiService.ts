@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { Message, Role } from "../types";
 import { DEFAULT_MODEL, SYSTEM_INSTRUCTION } from "../constants";
@@ -7,11 +6,14 @@ export class GeminiService {
   private ai: GoogleGenAI | null = null;
 
   private getClient() {
+    // Vite replaces process.env.API_KEY at build time
     const apiKey = process.env.API_KEY;
-    if (!apiKey) {
-      console.warn("API_KEY is not defined in process.env");
+    
+    if (!apiKey || apiKey === "") {
+      console.error("Luminol Error: API_KEY is missing. Check Netlify Environment Variables.");
       return null;
     }
+    
     if (!this.ai) {
       this.ai = new GoogleGenAI({ apiKey });
     }
@@ -21,7 +23,7 @@ export class GeminiService {
   async *streamChat(history: Message[], latestMessage: Message) {
     const ai = this.getClient();
     if (!ai) {
-      yield "Error: API Key not configured. Please check your Netlify environment variables.";
+      yield "⚠️ **System Configuration Error:** The Gemini API Key is missing. Keneilwe, please ensure your developer has added the `API_KEY` to the Netlify environment variables and triggered a fresh 'Clear Cache & Deploy'.";
       return;
     }
 
@@ -61,9 +63,13 @@ export class GeminiService {
           yield text;
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Gemini API Error:", error);
-      throw error;
+      if (error?.message?.includes('API_KEY_INVALID')) {
+        yield "❌ **Error:** The API Key provided is invalid.";
+      } else {
+        yield "❌ **Error:** Failed to connect to the AI brain. Please check your internet or try again later.";
+      }
     }
   }
 
