@@ -1,17 +1,30 @@
 
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { Message, Role } from "../types";
 import { DEFAULT_MODEL, SYSTEM_INSTRUCTION } from "../constants";
 
 export class GeminiService {
-  private ai: GoogleGenAI;
+  private ai: GoogleGenAI | null = null;
 
-  constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  private getClient() {
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+      console.warn("API_KEY is not defined in process.env");
+      return null;
+    }
+    if (!this.ai) {
+      this.ai = new GoogleGenAI({ apiKey });
+    }
+    return this.ai;
   }
 
   async *streamChat(history: Message[], latestMessage: Message) {
-    // Format history for the API
+    const ai = this.getClient();
+    if (!ai) {
+      yield "Error: API Key not configured. Please check your Netlify environment variables.";
+      return;
+    }
+
     const contents = history.map(msg => ({
       role: msg.role === Role.USER ? 'user' : 'model',
       parts: msg.parts.map(p => {
@@ -21,7 +34,6 @@ export class GeminiService {
       })
     }));
 
-    // Add current message
     contents.push({
       role: 'user',
       parts: latestMessage.parts.map(p => {
@@ -32,7 +44,7 @@ export class GeminiService {
     });
 
     try {
-      const responseStream = await this.ai.models.generateContentStream({
+      const responseStream = await ai.models.generateContentStream({
         model: DEFAULT_MODEL,
         contents,
         config: {
@@ -56,8 +68,11 @@ export class GeminiService {
   }
 
   async generateTitle(firstMessage: string): Promise<string> {
+    const ai = this.getClient();
+    if (!ai) return "New Chat";
+
     try {
-      const response = await this.ai.models.generateContent({
+      const response = await ai.models.generateContent({
         model: DEFAULT_MODEL,
         contents: `Summarize this message into a short 3-5 word title for a chat thread: "${firstMessage}"`,
         config: {
