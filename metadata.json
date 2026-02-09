@@ -1,0 +1,8 @@
+{
+  "name": "Luminol AI",
+  "description": "Personal AI assistant for Keneilwe, specializing in UFS Forensic Science and Trading.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
